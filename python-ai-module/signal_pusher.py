@@ -1,20 +1,94 @@
 import requests
 import time
 import json
+import threading
+from collections import deque
 from datetime import datetime
+from queue import Queue, Full
 from config import Config
+from circuit_breaker import CircuitBreaker
 
 
-class SignalPusher:
+class AsyncSignalPusher:
     def __init__(self):
         self.endpoint = Config.AI_SIGNAL_ENDPOINT
         self.feeder_id = Config.FEEDER_ID
-        self.session = requests.Session()
-        self.session.headers.update({
-            "Content-Type": "application/json"
-        })
+        self.circuit = CircuitBreaker()
 
-    def push_detection_signal(self, detection_result, frame_timestamp=None):
+        self._queue = Queue(maxsize=Config.PUSH_QUEUE_MAX_SIZE)
+        self._pool_size = Config.PUSH_THREAD_POOL_SIZE
+        self._workers = []
+        self._shutdown = threading.Event()
+
+        self._stats_lock = threading.Lock()
+        self._stats = {
+            "enqueued": 0, "dropped": 0, "sent": 0,
+            "failed": 0, "short_circuited": 0
+        }
+
+        self._session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=8,
+            pool_maxsize=32,
+            max_retries=1,
+            pool_block=False
+        )
+        self._session.mount("http://", adapter)
+        self._session.mount("https://", adapter)
+        self._session.headers.update({"Content-Type": "application/json"})
+
+        self._start_workers()
+
+    def _start_workers(self):
+        for i in range(self._pool_size):
+            t = threading.Thread(target=self._worker_loop, name=f"push-worker-{i}", daemon=True)
+            t.start()
+            self._workers.append(t)
+
+    def _worker_loop(self):
+        while not self._shutdown.is_set():
+            try:
+                item = self._queue.get(timeout=0.5)
+            except Exception:
+                continue
+
+            try:
+                payload = item["payload"]
+                detection = item["detection"]
+                self._do_push(payload, detection)
+            except Exception as e:
+                self._incr_stat("failed")
+                print(f"[PUSH-WORKER] unexpected error: {e}")
+            finally:
+                self._queue.task_done()
+
+    def _do_push(self, payload, detection):
+        if not self.circuit.can_execute():
+            self._incr_stat("short_circuited")
+            return
+
+        try:
+            response = self._session.post(
+                self.endpoint,
+                data=json.dumps(payload),
+                timeout=(Config.PUSH_CONNECTION_TIMEOUT, Config.PUSH_READ_TIMEOUT)
+            )
+
+            if 200 <= response.status_code < 300:
+                self.circuit.record_success()
+                self._incr_stat("sent")
+            else:
+                self.circuit.record_failure()
+                self._incr_stat("failed")
+
+        except (requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout,
+                requests.exceptions.HTTPError,
+                Exception):
+            self.circuit.record_failure()
+            self._incr_stat("failed")
+
+    def enqueue_signal(self, detection_result, frame_timestamp=None):
         if frame_timestamp is None:
             frame_timestamp = datetime.now().isoformat()
 
@@ -27,19 +101,59 @@ class SignalPusher:
             "allProbabilities": detection_result["all_probabilities"]
         }
 
+        item = {
+            "payload": payload,
+            "detection": detection_result,
+            "enqueue_ts": time.time()
+        }
+
         try:
-            response = self.session.post(
+            self._queue.put_nowait(item)
+            self._incr_stat("enqueued")
+            return {
+                "success": True,
+                "queued": True,
+                "queue_size": self._queue.qsize(),
+                "circuit_state": self.circuit.get_state()
+            }
+        except Full:
+            self._incr_stat("dropped")
+            return {
+                "success": False,
+                "queued": False,
+                "reason": "push_queue_full",
+                "dropped_total": self._get_stat("dropped")
+            }
+
+    def push_detection_signal_sync(self, detection_result, frame_timestamp=None):
+        if frame_timestamp is None:
+            frame_timestamp = datetime.now().isoformat()
+
+        payload = {
+            "feederId": self.feeder_id,
+            "timestamp": frame_timestamp,
+            "animalType": detection_result["class_name"],
+            "confidence": round(detection_result["confidence"], 4),
+            "aboveThreshold": detection_result["above_threshold"],
+            "allProbabilities": detection_result["all_probabilities"]
+        }
+
+        if not self.circuit.can_execute():
+            return {
+                "success": False,
+                "error": "circuit_open",
+                "message": "Circuit breaker is OPEN - skipping push to avoid cascade failure"
+            }
+
+        try:
+            response = self._session.post(
                 self.endpoint,
                 data=json.dumps(payload),
-                timeout=10
+                timeout=(Config.PUSH_CONNECTION_TIMEOUT, Config.PUSH_READ_TIMEOUT)
             )
             response.raise_for_status()
             result = response.json()
-
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-                  f"Signal pushed successfully: {detection_result['class_name']} "
-                  f"(confidence: {detection_result['confidence']:.4f})")
-            print(f"  Backend response: {result}")
+            self.circuit.record_success()
 
             return {
                 "success": True,
@@ -48,24 +162,21 @@ class SignalPusher:
             }
 
         except requests.exceptions.ConnectionError:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-                  f"Connection failed: Java backend unreachable at {self.endpoint}")
+            self.circuit.record_failure()
             return {
                 "success": False,
                 "error": "connection_error",
                 "message": "Java backend unreachable"
             }
         except requests.exceptions.Timeout:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-                  f"Request timed out when pushing signal")
+            self.circuit.record_failure()
             return {
                 "success": False,
                 "error": "timeout",
                 "message": "Request timed out"
             }
         except requests.exceptions.HTTPError as e:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-                  f"HTTP error: {e}")
+            self.circuit.record_failure()
             return {
                 "success": False,
                 "error": "http_error",
@@ -73,10 +184,36 @@ class SignalPusher:
                 "message": str(e)
             }
         except Exception as e:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-                  f"Unexpected error pushing signal: {e}")
+            self.circuit.record_failure()
             return {
                 "success": False,
                 "error": "unknown",
                 "message": str(e)
             }
+
+    def _incr_stat(self, key):
+        with self._stats_lock:
+            self._stats[key] = self._stats.get(key, 0) + 1
+
+    def _get_stat(self, key):
+        with self._stats_lock:
+            return self._stats.get(key, 0)
+
+    def get_stats(self):
+        with self._stats_lock:
+            s = dict(self._stats)
+        return {
+            **s,
+            "queue_current": self._queue.qsize(),
+            "queue_max": Config.PUSH_QUEUE_MAX_SIZE,
+            "circuit": self.circuit.get_metrics()
+        }
+
+    def shutdown(self):
+        self._shutdown.set()
+        for t in self._workers:
+            t.join(timeout=5)
+        self._session.close()
+
+
+SignalPusher = AsyncSignalPusher

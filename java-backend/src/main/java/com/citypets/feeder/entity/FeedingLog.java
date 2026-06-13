@@ -1,12 +1,10 @@
 package com.citypets.feeder.entity;
 
 import jakarta.persistence.*;
-import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
 
-@Data
 @Entity
 @Table(name = "feeding_log")
 public class FeedingLog {
@@ -52,16 +50,35 @@ public class FeedingLog {
     private LocalDateTime createTime;
 
     public enum AnimalType {
-        STRAY_CAT,
-        STRAY_DOG,
-        PEST_ANIMAL,
-        UNKNOWN
+        STRAY_CAT, STRAY_DOG, PEST_ANIMAL, UNKNOWN
     }
 
     public enum DoorAction {
-        NONE,
-        OPEN_FOR_FEEDING,
-        LOCK,
-        UNLOCK
+        NONE, OPEN_FOR_FEEDING, LOCK, UNLOCK
     }
+
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    public String getFeederId() { return feederId; }
+    public void setFeederId(String feederId) { this.feederId = feederId; }
+    public AnimalType getAnimalType() { return animalType; }
+    public void setAnimalType(AnimalType animalType) { this.animalType = animalType; }
+    public Double getConfidence() { return confidence; }
+    public void setConfidence(Double confidence) { this.confidence = confidence; }
+    public Integer getFoodDispensedGrams() { return foodDispensedGrams; }
+    public void setFoodDispensedGrams(Integer foodDispensedGrams) { this.foodDispensedGrams = foodDispensedGrams; }
+    public Integer getFoodBeforeGrams() { return foodBeforeGrams; }
+    public void setFoodBeforeGrams(Integer foodBeforeGrams) { this.foodBeforeGrams = foodBeforeGrams; }
+    public Integer getFoodAfterGrams() { return foodAfterGrams; }
+    public void setFoodAfterGrams(Integer foodAfterGrams) { this.foodAfterGrams = foodAfterGrams; }
+    public Boolean getFeedingSuccess() { return feedingSuccess; }
+    public void setFeedingSuccess(Boolean feedingSuccess) { this.feedingSuccess = feedingSuccess; }
+    public DoorAction getDoorAction() { return doorAction; }
+    public void setDoorAction(DoorAction doorAction) { this.doorAction = doorAction; }
+    public String getFailureReason() { return failureReason; }
+    public void setFailureReason(String failureReason) { this.failureReason = failureReason; }
+    public LocalDateTime getDetectionTimestamp() { return detectionTimestamp; }
+    public void setDetectionTimestamp(LocalDateTime detectionTimestamp) { this.detectionTimestamp = detectionTimestamp; }
+    public LocalDateTime getCreateTime() { return createTime; }
+    public void setCreateTime(LocalDateTime createTime) { this.createTime = createTime; }
 }
