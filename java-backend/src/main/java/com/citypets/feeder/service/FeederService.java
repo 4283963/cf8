@@ -15,8 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class FeederService {
@@ -139,5 +139,62 @@ public class FeederService {
     public long countRecentPest(String feederId, int windowSeconds) {
         LocalDateTime since = LocalDateTime.now().minusSeconds(windowSeconds);
         return logRepo.countRecentPestDetections(feederId, since);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getFatCatRanking(int hoursBack, int limit) {
+        LocalDateTime since = LocalDateTime.now().minusHours(hoursBack);
+        List<FeedingLog> rejects = logRepo.findDuplicateCatRejectsSince(since);
+        Map<String, FatCatAcc> byCat = new LinkedHashMap<>();
+        for (FeedingLog r : rejects) {
+            String cid = r.getCatFaceId();
+            if (cid == null || cid.isBlank()) continue;
+            FatCatAcc acc = byCat.computeIfAbsent(cid, k -> new FatCatAcc());
+            acc.catFaceId = cid;
+            acc.rejectCount++;
+            if (acc.firstSnapshot == null && r.getCatSnapshotB64() != null) {
+                acc.firstSnapshot = r.getCatSnapshotB64();
+            }
+            if (acc.funnyTag == null && r.getFunnyTag() != null) {
+                acc.funnyTag = r.getFunnyTag();
+            } else if (r.getFunnyTag() != null) {
+                acc.funnyTag = r.getFunnyTag();
+            }
+            if (acc.feederId == null) acc.feederId = r.getFeederId();
+            acc.lastSeen = r.getCreateTime();
+            if (r.getCatSimilarity() != null) {
+                acc.maxSimilarity = Math.max(acc.maxSimilarity, r.getCatSimilarity());
+            }
+            if (r.getCatDailyFeedCount() != null) {
+                acc.dailyCount = Math.max(acc.dailyCount, r.getCatDailyFeedCount());
+            }
+        }
+        return byCat.values().stream()
+                .sorted(Comparator.comparingInt((FatCatAcc a) -> a.rejectCount).reversed())
+                .limit(Math.max(1, limit))
+                .map(acc -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("catFaceId", acc.catFaceId);
+                    m.put("feederId", acc.feederId);
+                    m.put("rejectCount", acc.rejectCount);
+                    m.put("funnyTag", acc.funnyTag);
+                    m.put("snapshotB64", acc.firstSnapshot);
+                    m.put("maxSimilarity", Math.round(acc.maxSimilarity * 10000.0) / 10000.0);
+                    m.put("dailyFeedCount", acc.dailyCount);
+                    m.put("lastSeen", acc.lastSeen != null ? acc.lastSeen.toString() : null);
+                    return m;
+                })
+                .collect(Collectors.toList());
+    }
+
+    private static class FatCatAcc {
+        String catFaceId;
+        String feederId;
+        int rejectCount;
+        String funnyTag;
+        String firstSnapshot;
+        LocalDateTime lastSeen;
+        double maxSimilarity;
+        int dailyCount;
     }
 }

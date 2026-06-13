@@ -105,6 +105,13 @@ public class FeederController {
         return ApiResponse.ok(h);
     }
 
+    @GetMapping("/fat-cat-ranking")
+    public ApiResponse<List<Map<String, Object>>> fatCatRanking(
+            @RequestParam(defaultValue = "24") int hoursBack,
+            @RequestParam(defaultValue = "10") int limit) {
+        return ApiResponse.ok(feederService.getFatCatRanking(hoursBack, limit));
+    }
+
     private Object poolMetrics(ThreadPoolExecutor pool) {
         if (pool instanceof AsyncConfig.InstrumentedThreadPool ip) {
             return ip.getMetrics();

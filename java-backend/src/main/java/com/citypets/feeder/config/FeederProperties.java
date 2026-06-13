@@ -15,6 +15,8 @@ public class FeederProperties {
     private int asyncSignalQueueCapacity = 10000;
     private RateLimit rateLimit = new RateLimit();
     private CircuitBreakerProps circuitBreaker = new CircuitBreakerProps();
+    private DuplicateCat duplicateCat = new DuplicateCat();
+    private DailyLimit dailyLimit = new DailyLimit();
 
     public int getDefaultFoodAmountPerDispense() { return defaultFoodAmountPerDispense; }
     public void setDefaultFoodAmountPerDispense(int v) { this.defaultFoodAmountPerDispense = v; }
@@ -32,6 +34,10 @@ public class FeederProperties {
     public void setRateLimit(RateLimit rateLimit) { this.rateLimit = rateLimit; }
     public CircuitBreakerProps getCircuitBreaker() { return circuitBreaker; }
     public void setCircuitBreaker(CircuitBreakerProps circuitBreaker) { this.circuitBreaker = circuitBreaker; }
+    public DuplicateCat getDuplicateCat() { return duplicateCat; }
+    public void setDuplicateCat(DuplicateCat duplicateCat) { this.duplicateCat = duplicateCat; }
+    public DailyLimit getDailyLimit() { return dailyLimit; }
+    public void setDailyLimit(DailyLimit dailyLimit) { this.dailyLimit = dailyLimit; }
 
     public static class RateLimit {
         private double aiSignalPerFeederPerSecond = 2.0;
@@ -72,5 +78,31 @@ public class FeederProperties {
         public void setSlidingWindowType(String v) { this.slidingWindowType = v; }
         public int getMinimumNumberOfCalls() { return minimumNumberOfCalls; }
         public void setMinimumNumberOfCalls(int v) { this.minimumNumberOfCalls = v; }
+    }
+
+    public static class DuplicateCat {
+        private int feederLockSeconds = 3600;
+        private double minSimilarityForReject = 0.80;
+        private int maxDailyFeedsPerCat = 3;
+        private String defaultFunnyTag = "今日已饱";
+
+        public int getFeederLockSeconds() { return feederLockSeconds; }
+        public void setFeederLockSeconds(int v) { this.feederLockSeconds = v; }
+        public double getMinSimilarityForReject() { return minSimilarityForReject; }
+        public void setMinSimilarityForReject(double v) { this.minSimilarityForReject = v; }
+        public int getMaxDailyFeedsPerCat() { return maxDailyFeedsPerCat; }
+        public void setMaxDailyFeedsPerCat(int v) { this.maxDailyFeedsPerCat = v; }
+        public String getDefaultFunnyTag() { return defaultFunnyTag; }
+        public void setDefaultFunnyTag(String v) { this.defaultFunnyTag = v; }
+    }
+
+    public static class DailyLimit {
+        private int maxDailyGramsPerFeeder = 500;
+        private int maxDailyFeedsPerFeeder = 50;
+
+        public int getMaxDailyGramsPerFeeder() { return maxDailyGramsPerFeeder; }
+        public void setMaxDailyGramsPerFeeder(int v) { this.maxDailyGramsPerFeeder = v; }
+        public int getMaxDailyFeedsPerFeeder() { return maxDailyFeedsPerFeeder; }
+        public void setMaxDailyFeedsPerFeeder(int v) { this.maxDailyFeedsPerFeeder = v; }
     }
 }

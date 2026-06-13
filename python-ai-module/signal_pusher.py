@@ -88,7 +88,7 @@ class AsyncSignalPusher:
             self.circuit.record_failure()
             self._incr_stat("failed")
 
-    def enqueue_signal(self, detection_result, frame_timestamp=None):
+    def enqueue_signal(self, detection_result, frame_timestamp=None, cat_dedup_info=None):
         if frame_timestamp is None:
             frame_timestamp = datetime.now().isoformat()
 
@@ -100,6 +100,15 @@ class AsyncSignalPusher:
             "aboveThreshold": detection_result["above_threshold"],
             "allProbabilities": detection_result["all_probabilities"]
         }
+
+        if cat_dedup_info is not None:
+            payload["duplicateCat"] = bool(cat_dedup_info.get("is_duplicate", False))
+            payload["catFaceId"] = cat_dedup_info.get("duplicate_cat_id")
+            payload["catFaceHash"] = (cat_dedup_info.get("cat_face") or {}).get("feature_hash")
+            payload["catSnapshotB64"] = (cat_dedup_info.get("cat_face") or {}).get("snapshot_jpeg_b64")
+            payload["catLastSeenAgoSec"] = cat_dedup_info.get("last_seen_seconds_ago")
+            payload["catSimilarity"] = cat_dedup_info.get("similarity")
+            payload["catDailyFeedCount"] = cat_dedup_info.get("daily_feed_count_for_cat", 0)
 
         item = {
             "payload": payload,
@@ -125,7 +134,7 @@ class AsyncSignalPusher:
                 "dropped_total": self._get_stat("dropped")
             }
 
-    def push_detection_signal_sync(self, detection_result, frame_timestamp=None):
+    def push_detection_signal_sync(self, detection_result, frame_timestamp=None, cat_dedup_info=None):
         if frame_timestamp is None:
             frame_timestamp = datetime.now().isoformat()
 
@@ -137,6 +146,15 @@ class AsyncSignalPusher:
             "aboveThreshold": detection_result["above_threshold"],
             "allProbabilities": detection_result["all_probabilities"]
         }
+
+        if cat_dedup_info is not None:
+            payload["duplicateCat"] = bool(cat_dedup_info.get("is_duplicate", False))
+            payload["catFaceId"] = cat_dedup_info.get("duplicate_cat_id")
+            payload["catFaceHash"] = (cat_dedup_info.get("cat_face") or {}).get("feature_hash")
+            payload["catSnapshotB64"] = (cat_dedup_info.get("cat_face") or {}).get("snapshot_jpeg_b64")
+            payload["catLastSeenAgoSec"] = cat_dedup_info.get("last_seen_seconds_ago")
+            payload["catSimilarity"] = cat_dedup_info.get("similarity")
+            payload["catDailyFeedCount"] = cat_dedup_info.get("daily_feed_count_for_cat", 0)
 
         if not self.circuit.can_execute():
             return {

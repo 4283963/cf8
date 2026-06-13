@@ -35,9 +35,18 @@ CREATE TABLE IF NOT EXISTS feeding_log (
     failure_reason VARCHAR(500),
     detection_timestamp DATETIME,
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    cat_face_id VARCHAR(64),
+    cat_face_hash VARCHAR(64),
+    cat_snapshot_b64 LONGTEXT,
+    cat_similarity DOUBLE,
+    cat_daily_feed_count INT,
+    duplicate_cat_feed TINYINT(1) DEFAULT 0,
+    funny_tag VARCHAR(50),
     INDEX idx_feeder_time (feeder_id, create_time DESC),
     INDEX idx_animal_type (animal_type),
-    INDEX idx_feeding_success (feeding_success)
+    INDEX idx_feeding_success (feeding_success),
+    INDEX idx_cat_face_id (cat_face_id),
+    INDEX idx_duplicate_cat (duplicate_cat_feed, create_time DESC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT INTO feeder_device (feeder_id, name, location, food_capacity_grams, food_remaining_grams, food_percentage) VALUES

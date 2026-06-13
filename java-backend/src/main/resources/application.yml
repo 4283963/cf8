@@ -91,3 +91,13 @@ feeder:
     minimum-number-of-calls: 10
 
   async-signal-queue-capacity: 10000
+
+  duplicate-cat:
+    feeder-lock-seconds: 3600
+    min-similarity-for-reject: 0.80
+    max-daily-feeds-per-cat: 3
+    default-funny-tag: "今日已饱"
+
+  daily-limit:
+    max-daily-grams-per-feeder: 500
+    max-daily-feeds-per-feeder: 50

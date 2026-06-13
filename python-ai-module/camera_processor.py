@@ -7,6 +7,7 @@ from config import Config
 from animal_classifier import LightweightAnimalClassifier
 from signal_pusher import AsyncSignalPusher
 from frame_prefilter import LightweightFramePrefilter
+from cat_face_tracker import CatFaceDeduplicationTracker
 
 
 class AsyncCameraFrameProcessor:
@@ -14,6 +15,7 @@ class AsyncCameraFrameProcessor:
         self.classifier = LightweightAnimalClassifier()
         self.pusher = AsyncSignalPusher()
         self.prefilter = LightweightFramePrefilter()
+        self.cat_tracker = CatFaceDeduplicationTracker() if Config.CAT_FACE_DEDUP_ENABLED else None
         self.camera_source = Config.CAMERA_SOURCE
         self.frame_interval = Config.FRAME_INTERVAL
         self.cap = None
@@ -36,7 +38,9 @@ class AsyncCameraFrameProcessor:
             "inferences_done": 0,
             "low_confidence_skipped": 0,
             "dedup_skipped": 0,
-            "pushes_enqueued": 0
+            "pushes_enqueued": 0,
+            "cat_face_duplicates": 0,
+            "cat_face_new": 0
         }
 
         self._start_inference_workers()
@@ -89,7 +93,18 @@ class AsyncCameraFrameProcessor:
                 return
             self._last_pushed_per_class[class_name] = now
 
-        push_result = self.pusher.enqueue_signal(detection, timestamp)
+        cat_dedup_info = None
+        if self.cat_tracker is not None and class_name == "stray_cat":
+            try:
+                cat_dedup_info = self.cat_tracker.check_or_register(frame)
+                if cat_dedup_info.get("is_duplicate"):
+                    self._incr_stat("cat_face_duplicates")
+                else:
+                    self._incr_stat("cat_face_new")
+            except Exception as e:
+                print(f"[INF] cat tracker error: {e}")
+
+        push_result = self.pusher.enqueue_signal(detection, timestamp, cat_dedup_info)
         if push_result.get("queued"):
             self._incr_stat("pushes_enqueued")
 
@@ -130,12 +145,27 @@ class AsyncCameraFrameProcessor:
     def process_image_file(self, image_path):
         detection = self.classifier.predict(image_path)
         timestamp = datetime.now().isoformat()
-        push_result = self.pusher.push_detection_signal_sync(detection, timestamp)
+
+        cat_dedup_info = None
+        if self.cat_tracker is not None and detection.get("class_name") == "stray_cat":
+            try:
+                frame = cv2.imread(image_path) if isinstance(image_path, str) else image_path
+                if frame is not None:
+                    cat_dedup_info = self.cat_tracker.check_or_register(frame)
+                    if cat_dedup_info.get("is_duplicate"):
+                        self._incr_stat("cat_face_duplicates")
+                    else:
+                        self._incr_stat("cat_face_new")
+            except Exception as e:
+                print(f"[INF] cat tracker image file error: {e}")
+
+        push_result = self.pusher.push_detection_signal_sync(detection, timestamp, cat_dedup_info)
         self._incr_stat("inferences_done")
         if push_result.get("success"):
             self._incr_stat("pushes_enqueued")
         return {
             "detection": detection,
+            "cat_dedup": cat_dedup_info,
             "push_result": push_result,
             "timestamp": timestamp
         }
@@ -199,7 +229,7 @@ class AsyncCameraFrameProcessor:
     def get_stats(self):
         with self._stats_lock:
             s = dict(self._stats)
-        return {
+        result = {
             "processor": s,
             "inference_queue": {
                 "current": self._inference_queue.qsize(),
@@ -207,6 +237,9 @@ class AsyncCameraFrameProcessor:
             },
             "pusher": self.pusher.get_stats()
         }
+        if self.cat_tracker is not None:
+            result["cat_tracker"] = self.cat_tracker.get_stats()
+        return result
 
     def shutdown(self):
         self._shutdown.set()

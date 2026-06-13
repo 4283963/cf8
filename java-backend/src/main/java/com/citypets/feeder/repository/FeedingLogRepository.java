@@ -27,4 +27,18 @@ public interface FeedingLogRepository extends JpaRepository<FeedingLog, Long> {
            "AND f.createTime >= :windowStart")
     long countRecentPestDetections(@Param("feederId") String feederId,
                                    @Param("windowStart") LocalDateTime windowStart);
+
+    @Query("SELECT f FROM FeedingLog f WHERE f.catFaceId IS NOT NULL AND f.duplicateCatFeed = true " +
+           "AND f.createTime >= :since ORDER BY f.createTime DESC")
+    List<FeedingLog> findDuplicateCatRejectsSince(@Param("since") LocalDateTime since);
+
+    @Query("SELECT COALESCE(SUM(CASE WHEN f.foodDispensedGrams IS NULL THEN 0 ELSE f.foodDispensedGrams END), 0) " +
+           "FROM FeedingLog f WHERE f.feederId = :feederId AND f.feedingSuccess = true AND f.createTime >= :since")
+    int sumDailyFoodDispensedGrams(@Param("feederId") String feederId,
+                                   @Param("since") LocalDateTime since);
+
+    @Query("SELECT COUNT(f) FROM FeedingLog f WHERE f.feederId = :feederId " +
+           "AND f.feedingSuccess = true AND f.createTime >= :since")
+    long countDailySuccessfulFeeds(@Param("feederId") String feederId,
+                                   @Param("since") LocalDateTime since);
 }

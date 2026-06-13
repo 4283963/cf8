@@ -142,12 +142,32 @@ public class FeedingService {
         logEntry.setConfidence(req.getConfidence());
         logEntry.setDetectionTimestamp(req.getTimestamp() != null
                 ? parseTimestamp(req.getTimestamp()) : LocalDateTime.now());
+        enrichLogEntryWithCatInfo(logEntry, req);
 
         AiSignalProcessResult.Builder result = AiSignalProcessResult.builder()
                 .feederId(feederId)
                 .animalType(rawAnimalType)
                 .confidence(req.getConfidence() != null ? req.getConfidence() : 0.0)
                 .processingMode("sync");
+        enrichResultWithCatInfo(result, req);
+
+        boolean isCat = (animalType == FeedingLog.AnimalType.STRAY_CAT);
+        if (isCat && Boolean.TRUE.equals(req.getDuplicateCat())) {
+            double sim = req.getCatSimilarity() != null ? req.getCatSimilarity() : 0.0;
+            if (sim >= props.getDuplicateCat().getMinSimilarityForReject()) {
+                return handleDuplicateFatCat(feeder, logEntry, result, req);
+            }
+        }
+        if (isCat && req.getCatDailyFeedCount() != null
+                && req.getCatDailyFeedCount() > props.getDuplicateCat().getMaxDailyFeedsPerCat()) {
+            return handleDuplicateFatCat(feeder, logEntry, result, req);
+        }
+        if (isDailyLimitExceeded(feederId)) {
+            return completeWithNoFeed(feeder, logEntry, result,
+                    FeedingLog.DoorAction.NONE,
+                    "DAILY_LIMIT_EXCEEDED: feeder daily gram/feed cap reached",
+                    false, null);
+        }
 
         if (Boolean.FALSE.equals(req.getAboveThreshold())) {
             return completeWithNoFeed(feeder, logEntry, result,
@@ -192,6 +212,89 @@ public class FeedingService {
         }
 
         return performFeeding(feeder, logEntry, result, animalType);
+    }
+
+    private void enrichLogEntryWithCatInfo(FeedingLog logEntry, AiSignalRequest req) {
+        if (req.getCatFaceId() != null) logEntry.setCatFaceId(req.getCatFaceId());
+        if (req.getCatFaceHash() != null) logEntry.setCatFaceHash(req.getCatFaceHash());
+        if (req.getCatSnapshotB64() != null) logEntry.setCatSnapshotB64(req.getCatSnapshotB64());
+        if (req.getCatSimilarity() != null) logEntry.setCatSimilarity(req.getCatSimilarity());
+        if (req.getCatDailyFeedCount() != null) logEntry.setCatDailyFeedCount(req.getCatDailyFeedCount());
+        if (req.getDuplicateCat() != null) logEntry.setDuplicateCatFeed(req.getDuplicateCat());
+    }
+
+    private void enrichResultWithCatInfo(AiSignalProcessResult.Builder result, AiSignalRequest req) {
+        result.duplicateCat(req.getDuplicateCat() != null ? req.getDuplicateCat() : false);
+        if (req.getCatFaceId() != null) result.catFaceId(req.getCatFaceId());
+        if (req.getCatSnapshotB64() != null) result.catSnapshotB64(req.getCatSnapshotB64());
+        if (req.getCatSimilarity() != null) result.catSimilarity(req.getCatSimilarity());
+        if (req.getCatDailyFeedCount() != null) result.catDailyFeedCount(req.getCatDailyFeedCount());
+    }
+
+    private boolean isDailyLimitExceeded(String feederId) {
+        LocalDateTime dayStart = LocalDateTime.now().toLocalDate().atStartOfDay();
+        int usedGrams = feedingLogRepo.sumDailyFoodDispensedGrams(feederId, dayStart);
+        long feeds = feedingLogRepo.countDailySuccessfulFeeds(feederId, dayStart);
+        return usedGrams >= props.getDailyLimit().getMaxDailyGramsPerFeeder()
+                || feeds >= props.getDailyLimit().getMaxDailyFeedsPerFeeder();
+    }
+
+    private static final String[] FUNNY_TAGS = {
+            "今日已饱", "饭票已用完", "别吃了大肥猫", "肚肚警告",
+            "回头客警告", "猫粮KPI已达标", "今日份幸福已签收"
+    };
+
+    private String pickFunnyTag(int dailyCount) {
+        if (dailyCount <= 0) return props.getDuplicateCat().getDefaultFunnyTag();
+        int idx = Math.min(dailyCount - 1, FUNNY_TAGS.length - 1);
+        return FUNNY_TAGS[idx];
+    }
+
+    private AiSignalProcessResult handleDuplicateFatCat(FeederDevice feeder, FeedingLog logEntry,
+                                                          AiSignalProcessResult.Builder result,
+                                                          AiSignalRequest req) {
+        String feederId = feeder.getFeederId();
+        int lockSeconds = props.getDuplicateCat().getFeederLockSeconds();
+        LocalDateTime lockUntil = LocalDateTime.now().plusSeconds(lockSeconds);
+
+        feeder.setDoorLocked(true);
+        String tag = pickFunnyTag(req.getCatDailyFeedCount() != null ? req.getCatDailyFeedCount() : 1);
+        feeder.setLockReason(String.format(
+                "DUPLICATE_FAT_CAT: cat=%s tag=[%s] count=%dx sim=%.2f -> LOCK %ds",
+                req.getCatFaceId() != null ? req.getCatFaceId() : "unknown",
+                tag,
+                req.getCatDailyFeedCount() != null ? req.getCatDailyFeedCount() : 1,
+                req.getCatSimilarity() != null ? req.getCatSimilarity() : 0.0,
+                lockSeconds
+        ));
+        feeder.setLockUntil(lockUntil);
+
+        logEntry.setFeedingSuccess(false);
+        logEntry.setDoorAction(FeedingLog.DoorAction.LOCK);
+        logEntry.setFailureReason("DUPLICATE_FAT_CAT: " + tag);
+        logEntry.setFoodDispensedGrams(0);
+        logEntry.setFoodBeforeGrams(feeder.getFoodRemainingGrams());
+        logEntry.setFoodAfterGrams(feeder.getFoodRemainingGrams());
+        logEntry.setDuplicateCatFeed(true);
+        logEntry.setFunnyTag(tag);
+        feedingLogRepo.save(logEntry);
+        evictFeederCache(feederId);
+
+        issueHardwareCommand(feederId, "DOOR_LOCK");
+
+        result.feedingTriggered(false)
+                .foodDispensedGrams(0)
+                .foodRemainingPercentage(feeder.getFoodPercentage())
+                .doorAction(FeedingLog.DoorAction.LOCK.name())
+                .doorLocked(true)
+                .lockReason(feeder.getLockReason())
+                .lockExpireSecondsRemaining((long) lockSeconds)
+                .feederLockSecondsRemaining((long) lockSeconds)
+                .statusMessage("REJECTED[" + tag + "]: 重复投喂已拒绝，喂食机锁定" + (lockSeconds / 60) + "分钟")
+                .pestAlarm(false)
+                .duplicateCat(true)
+                .funnyTag(tag);
+        return result.build();
     }
 
     private AiSignalProcessResult handlePestAnimal(FeederDevice feeder, FeedingLog logEntry,

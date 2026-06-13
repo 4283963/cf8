@@ -49,6 +49,28 @@ public class FeedingLog {
     @Column(name = "create_time", updatable = false)
     private LocalDateTime createTime;
 
+    @Column(name = "cat_face_id", length = 64)
+    private String catFaceId;
+
+    @Column(name = "cat_face_hash", length = 64)
+    private String catFaceHash;
+
+    @Column(name = "cat_snapshot_b64", columnDefinition = "LONGTEXT")
+    @Lob
+    private String catSnapshotB64;
+
+    @Column(name = "cat_similarity")
+    private Double catSimilarity;
+
+    @Column(name = "cat_daily_feed_count")
+    private Integer catDailyFeedCount;
+
+    @Column(name = "duplicate_cat_feed", columnDefinition = "TINYINT(1) DEFAULT 0")
+    private Boolean duplicateCatFeed = false;
+
+    @Column(name = "funny_tag", length = 50)
+    private String funnyTag;
+
     public enum AnimalType {
         STRAY_CAT, STRAY_DOG, PEST_ANIMAL, UNKNOWN
     }
@@ -81,4 +103,19 @@ public class FeedingLog {
     public void setDetectionTimestamp(LocalDateTime detectionTimestamp) { this.detectionTimestamp = detectionTimestamp; }
     public LocalDateTime getCreateTime() { return createTime; }
     public void setCreateTime(LocalDateTime createTime) { this.createTime = createTime; }
+
+    public String getCatFaceId() { return catFaceId; }
+    public void setCatFaceId(String catFaceId) { this.catFaceId = catFaceId; }
+    public String getCatFaceHash() { return catFaceHash; }
+    public void setCatFaceHash(String catFaceHash) { this.catFaceHash = catFaceHash; }
+    public String getCatSnapshotB64() { return catSnapshotB64; }
+    public void setCatSnapshotB64(String catSnapshotB64) { this.catSnapshotB64 = catSnapshotB64; }
+    public Double getCatSimilarity() { return catSimilarity; }
+    public void setCatSimilarity(Double catSimilarity) { this.catSimilarity = catSimilarity; }
+    public Integer getCatDailyFeedCount() { return catDailyFeedCount; }
+    public void setCatDailyFeedCount(Integer catDailyFeedCount) { this.catDailyFeedCount = catDailyFeedCount; }
+    public Boolean getDuplicateCatFeed() { return duplicateCatFeed; }
+    public void setDuplicateCatFeed(Boolean duplicateCatFeed) { this.duplicateCatFeed = duplicateCatFeed; }
+    public String getFunnyTag() { return funnyTag; }
+    public void setFunnyTag(String funnyTag) { this.funnyTag = funnyTag; }
 }
